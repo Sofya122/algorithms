@@ -1,0 +1,140 @@
+// интерфейс сортировщика
+#pragma once
+#include <vector>
+
+template <typename T>
+class ISort {
+public:
+    virtual ~ISort() = default;
+    virtual void sort(std::vector<T>& data) = 0;
+    virtual std::string name() const = 0;
+};
+//  оптимизированный BubbleSort
+#pragma once
+#include "ISort.h"
+#include <utility>
+
+template <typename T>
+class BubbleSort : public ISort<T> {
+public:
+    void sort(std::vector<T>& data) override {
+        if (data.empty()) return;
+
+        size_t n = data.size();
+        size_t lastSwap = n - 1; // модификация #2: граница прохода
+
+        while (lastSwap > 0) {
+            size_t newLastSwap = 0;
+            bool swapped = false; // модификация #1: флаг раннего выхода
+
+            for (size_t i = 0; i < lastSwap; ++i) {
+                if (data[i] > data[i + 1]) {
+                    std::swap(data[i], data[i + 1]);
+                    swapped = true;
+                    newLastSwap = i;
+                }
+            }
+
+            if (!swapped) break;   // массив уже отсортирован
+            lastSwap = newLastSwap; // сужаем диапазон
+        }
+    }
+
+    std::string name() const override { return "BubbleSort (optimized)"; }
+};
+
+
+// сортировка вставками
+#pragma once
+#include "ISort.h"
+
+template <typename T>
+class InsertionSort : public ISort<T> {
+public:
+    void sort(std::vector<T>& data) override {
+        for (size_t i = 1; i < data.size(); ++i) {
+            T key = data[i];
+            size_t j = i;
+            while (j > 0 && data[j - 1] > key) {
+                data[j] = data[j - 1];
+                --j;
+            }
+            data[j] = key;
+        }
+    }
+
+    std::string name() const override { return "InsertionSort"; }
+};
+
+
+// тесты и сохранение в файл
+#pragma once
+#include "ISort.h"
+#include <vector>
+#include <string>
+#include <iostream>
+#include <fstream>
+#include <functional>
+#include <sstream>
+
+template <typename T>
+class TestFramework {
+public:
+    struct TestCase {
+        std::string description;
+        std::vector<T> input;
+        std::vector<T> expected;
+    };
+
+    void addCase(const std::string& desc,
+                 std::vector<T> input,
+                 std::vector<T> expected) {
+        cases_.push_back({desc, std::move(input), std::move(expected)});
+    }
+
+    bool run(ISort<T>& sorter, const std::string& fileName = "") {
+        std::cout << "\n=== " << sorter.name()
+                  << " | тип: " << typeName() << " ===\n";
+
+        std::ofstream out;
+        if (!fileName.empty()) {
+            out.open(fileName, std::ios::app);
+            out << "\n=== " << sorter.name()
+                << " | тип: " << typeName() << " ===\n";
+        }
+
+        int passed = 0, failed = 0;
+
+        for (const auto& tc : cases_) {
+            std::vector<T> data = tc.input;
+            sorter.sort(data);
+
+            bool ok = (data == tc.expected);
+            std::string status = ok ? "[PASS]" : "[FAIL]";
+
+            std::cout << status << " " << tc.description << "\n";
+            if (out.is_open()) {
+                out << status << " " << tc.description << "\n";
+            }
+
+            if (ok) ++passed; else ++failed;
+        }
+
+        std::cout << "Итого: " << passed << " passed, "
+                  << failed << " failed\n";
+        if (out.is_open()) {
+            out << "Итого: " << passed << " passed, "
+                << failed << " failed\n";
+        }
+        return failed == 0;
+    }
+
+private:
+    std::vector<TestCase> cases_;
+
+    static std::string typeName() {
+        if constexpr (std::is_same_v<T, int>) return "int";
+        else if constexpr (std::is_same_v<T, std::string>) return "std::string";
+        else return "unknown";
+    }
+};
