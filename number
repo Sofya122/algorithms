@@ -1,0 +1,205 @@
+#include <iostream>
+#include <string>
+#include <vector>
+#include <set>
+#include <sstream>
+#include <stdexcept>
+
+// ===== IP-АДРЕС =====
+struct SlpAddress {
+    uint8_t o[4];
+
+    SlpAddress() { o[0]=o[1]=o[2]=o[3]=0; }
+    SlpAddress(uint8_t a, uint8_t b, uint8_t c, uint8_t d) { o[0]=a; o[1]=b; o[2]=c; o[3]=d; }
+
+    explicit SlpAddress(const std::string& s) {
+        int a,b,c,d; char dot;
+        std::istringstream(s) >> a >> dot >> b >> dot >> c >> dot >> d;
+        if (a<0||a>255||b<0||b>255||c<0||c>255||d<0||d>255)
+            throw std::out_of_range("Октет вне 0-255");
+        o[0]=a; o[1]=b; o[2]=c; o[3]=d;
+    }
+
+    std::string ToString() const {
+        return std::to_string(o[0])+"."+std::to_string(o[1])+"."+
+               std::to_string(o[2])+"."+std::to_string(o[3]);
+    }
+
+    uint32_t toUint() const {
+        return (uint32_t(o[0])<<24)|(uint32_t(o[1])<<16)|(uint32_t(o[2])<<8)|o[3];
+    }
+
+    // Хост в сети?
+    bool inNetwork(const SlpAddress& net, const SlpAddress& mask) const {
+        return (toUint() & mask.toUint()) == (net.toUint() & mask.toUint());
+    }
+
+    SlpAddress operator+(const SlpAddress& r) const {
+        uint32_t v = toUint() + r.toUint();
+        return {(uint8_t)(v>>24),(uint8_t)(v>>16),(uint8_t)(v>>8),(uint8_t)v};
+    }
+
+    friend std::ostream& operator<<(std::ostream& os, const SlpAddress& ip) {
+        return os << ip.ToString();
+    }
+};
+
+// СТРАНА ПО КОДУ
+std::string detectCountry(const std::string& digits) {
+    static const std::vector<std::pair<std::string,std::string>> db = {
+        {"380","Украина"},{"375","Беларусь"},{"998","Узбекистан"},
+        {"44","Великобритания"},{"49","Германия"},{"1","США/Канада"},
+        {"7","Россия/Казахстан"},{"86","Китай"}
+    };
+    for (auto& [code, country] : db)
+        if (digits.size()>=code.size() && digits.substr(0,code.size())==code)
+            return country;
+    return "Неизвестно";
+}
+
+// НОМЕР ТЕЛЕФОНА 
+struct PhoneNumber {
+    std::string raw, country, code, number;
+
+    explicit PhoneNumber(const std::string& input) : raw(input) {
+        // Проверка символов
+        for (char c : input)
+            if (!std::isdigit(c) && c!='+' && c!='-' && c!='_' && c!=' ' && c!='(' && c!=')')
+                throw std::invalid_argument("Плохой символ: "+std::string(1,c));
+
+        // Только цифры
+        std::string digits;
+        for (char c : input) if (std::isdigit(c)) digits += c;
+
+        if (digits.size()<10 || digits.size()>15)
+            throw std::invalid_argument("Неверная длина");
+
+        if (digits[0]=='8') digits[0]='7';
+
+        // Поиск кода страны (от длинного к короткому)
+        for (int len=3; len>=1; --len) {
+            if (digits.size()>(size_t)len) {
+                std::string c = detectCountry(digits.substr(0,len));
+                if (c!="Неизвестно") {
+                    code=digits.substr(0,len);
+                    number=digits.substr(len);
+                    country=c;
+                    return;
+                }
+            }
+        }
+        throw std::invalid_argument("Код страны не найден");
+    }
+
+    // Красивый вывод
+    std::string ToString() const {
+        if (number.size()<10) return "+"+code+" "+number;
+        return "+"+code+" ("+number.substr(0,3)+") "+
+               number.substr(3,3)+"-"+number.substr(6,2)+"-"+number.substr(8,2);
+    }
+
+    std::string digitsOnly() const { return code+number; }
+};
+
+template<>
+bool Sum<bool>(const bool& a, const bool& b) { return a&&b; }
+
+// ===== МИНИ-ТЕСТЫ =====
+int passed=0, failed=0;
+
+#define TEST(name) void name(); static bool _r_##name = (name(), true); void name()
+#define ASSERT_EQ(a,b) if ((a)!=(b)) { std::cout<<" "<<#a"!="<<#b<<"\n"; failed++; }
+#define ASSERT_TRUE(x) if (!(x)) { std::cout<< <<#x<<"\n"; failed++; }
+#define ASSERT_THROW(expr, Ex) { bool c=false; try { expr; } catch (const Ex&) { c=true; } if (!c) { std::cout<<" no exception "<<#expr<<"\n"; failed++; } }
+#define PASS(name) { std::cout<<<<name<<"\n"; passed++; }
+
+// ===== ТЕСТЫ =====
+TEST(test_ip_parse) {
+    SlpAddress ip("192.168.1.1");
+    ASSERT_EQ(ip.o[0], 192);
+    ASSERT_EQ(ip.o[3], 1);
+    PASS("IP parse");
+}
+
+TEST(test_ip_network) {
+    SlpAddress host("192.168.1.50"), net("192.168.1.0"), mask("255.255.255.0");
+    ASSERT_TRUE(host.inNetwork(net, mask));
+    PASS("IP in network");
+}
+
+TEST(test_ip_not_in_network) {
+    SlpAddress host("192.168.2.1"), net("192.168.1.0"), mask("255.255.255.0");
+    ASSERT_TRUE(!host.inNetwork(net, mask));
+    PASS("IP not in network");
+}
+
+TEST(test_sum_int) {
+    ASSERT_EQ(Sum<int>(4,2), 6);
+    PASS("Sum<int>");
+}
+
+TEST(test_sum_bool) {
+    ASSERT_TRUE(Sum<bool>(true,true));
+    ASSERT_TRUE(!Sum<bool>(true,false));
+    PASS("Sum<bool>");
+}
+
+TEST(test_phone_russia) {
+    PhoneNumber p("+7 (999) 123-45-67");
+    ASSERT_EQ(p.code, "7");
+    ASSERT_EQ(p.country, "Россия/Казахстан");
+    PASS("Phone Russia");
+}
+
+TEST(test_phone_8_format) {
+    PhoneNumber p("8-916-123-45-67");
+    ASSERT_EQ(p.code, "7");
+    PASS("Phone 8→7");
+}
+
+TEST(test_phone_invalid) {
+    ASSERT_THROW(PhoneNumber("+7@999"), std::invalid_argument);
+    ASSERT_THROW(PhoneNumber("+7123"), std::invalid_argument);
+    PASS("Phone invalid");
+}
+
+TEST(test_registry) {
+    std::set<std::string> reg;
+    PhoneNumber a("+79991234567"), b("+7 (999) 123-45-67");
+    reg.insert(a.digitsOnly());
+    bool added = reg.insert(b.digitsOnly()).second;
+    ASSERT_TRUE(!added); // дубликат
+    PASS("Registry unique");
+}
+
+// ===== MAIN =====
+int main() {
+    std::cout << "=== Демонстрация ===\n\n";
+
+    // IP
+    SlpAddress ip("192.168.1.100"), net("192.168.1.0"), mask("255.255.255.0");
+    std::cout << "IP: " << ip << "\n";
+    std::cout << "В сети 192.168.1.0/24? " << (ip.inNetwork(net,mask)?"ДА":"НЕТ") << "\n";
+    std::cout << "Sum<IP>(0.0.0.1, 0.0.0.2) = " << Sum(SlpAddress(0,0,0,1), SlpAddress(0,0,0,2)) << "\n\n";
+
+    // Телефоны
+    std::vector<std::string> nums = {
+        "+7 (999) 123-45-67", "8-916-555-12-34", "+7_999_123_45_67",
+        "+44 20 7946 0958", "+380501234567"
+    };
+    for (auto& s : nums) {
+        try {
+            PhoneNumber p(s);
+            std::cout << s << " → " << p.ToString() << " [" << p.country << "]\n";
+        } catch (std::exception& e) {
+            std::cout << s << " → ОШИБКА: " << e.what() << "\n";
+        }
+    }
+    std::cout << "\n";
+
+    // Тесты
+    std::cout << "=== Тесты ===\n";
+    std::cout << "Итого: " << passed << " passed, " << failed << " failed\n";
+
+    return failed ? 1 : 0;
+}
